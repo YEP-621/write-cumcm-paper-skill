@@ -1,0 +1,4 @@
+interface:
+  display_name: "国赛高质量 XeLaTeX 论文"
+  short_description: "先审查建模证据，再撰写、修改和验收国赛 LaTeX 论文"
+  default_prompt: "使用 $write-cumcm-paper 审查建模成果并撰写或验收一篇高质量 CUMCM XeLaTeX 论文。"

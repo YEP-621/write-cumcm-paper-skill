@@ -1,0 +1,27 @@
+{
+  "used": true,
+  "tools": [
+    {
+      "name": "[AI工具名称]",
+      "model": "[版本或型号]",
+      "provider": "[开发机构或公司]",
+      "date": "[YYYY-MM-DD]"
+    }
+  ],
+  "purposes": [
+    {
+      "stage": "[使用环节]",
+      "purpose": "[具体目的]",
+      "affected_sections": ["[受影响章节]"]
+    }
+  ],
+  "key_interactions": [
+    {
+      "prompt": "[关键提示词]",
+      "response_summary": "[关键回复摘要]",
+      "adopted": "[采纳内容]",
+      "human_changes": "[人工核验和修改]"
+    }
+  ]
+}
+

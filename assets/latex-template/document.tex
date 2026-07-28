@@ -1,0 +1,30 @@
+% !TEX program = xelatex
+\documentclass[withoutpreface,bwprint]{cumcmthesis}
+
+\title{[请填写能够概括核心建模工作的论文标题]}
+
+\begin{document}
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+\input{texfile/1Abstract}
+\clearpage
+
+\input{texfile/2ProblemRestatement}
+\input{texfile/3ProblemAnalysis}
+\input{texfile/4AssumptionAndSign}
+
+% <CUMCM:PROBLEM_INPUTS>
+\input{texfile/5Problem1}
+% </CUMCM:PROBLEM_INPUTS>
+
+\input{texfile/7ModelEvaluation}
+\input{texfile/8AIStatement}
+\input{texfile/9Reference}
+
+\CumcmBodyEnd
+\clearpage
+\appendix
+\input{texfile/10Appendix}
+
+\end{document}
