@@ -164,6 +164,50 @@ class AuditTests(unittest.TestCase):
             self.assertIn("交叉引用没有对应标签", titles)
             self.assertIn("引用键不在参考文献数据库中", titles)
 
+    def test_graphicspath_asset_is_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            main = root / "document.tex"
+            figure = root / "texfile" / "figures" / "chart.pdf"
+            figure.parent.mkdir(parents=True)
+            figure.write_bytes(b"%PDF-test")
+            sources = [
+                source(main, r"\includegraphics{chart.pdf}"),
+                source(root / "cumcmthesis.cls", r"\graphicspath{{texfile/figures/}}"),
+            ]
+            issues: list[audit.Issue] = []
+            audit.check_assets(main, sources, issues)
+            self.assertNotIn("图片不存在", {item.title for item in issues})
+
+    def test_reference_mention_is_not_mistaken_for_page_heading(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            main.write_text("", encoding="utf-8")
+            main.with_suffix(".aux").write_text(
+                "\\newlabel{cumcm:abstract-end}{{}{1}}\n\\newlabel{cumcm:body-end}{{}{3}}\n",
+                encoding="utf-8",
+            )
+            pdf = main.with_suffix(".pdf")
+            pdf.write_bytes(b"%PDF-test")
+            class Reader:
+                pages = [
+                    FakePage("摘要\n关键词"),
+                    FakePage("正文中提到参考文献但不是标题"),
+                    FakePage("参考文献\n[1] 中文文献"),
+                ]
+                metadata = {"/Author": ""}
+            previous = sys.modules.get("pypdf")
+            sys.modules["pypdf"] = types.SimpleNamespace(PdfReader=lambda _: Reader())
+            try:
+                issues: list[audit.Issue] = []
+                audit.check_pdf(main, pdf, issues)
+            finally:
+                if previous is None:
+                    sys.modules.pop("pypdf", None)
+                else:
+                    sys.modules["pypdf"] = previous
+            self.assertNotIn("参考文献未从独立页面开始", {item.title for item in issues})
+
     def test_unlabelled_figure_is_warned(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             main = Path(temp) / "main.tex"
@@ -299,6 +343,82 @@ class AuditTests(unittest.TestCase):
             self.assertIn("建模成果可写性审查仍含占位内容", titles)
             self.assertIn("主张—证据矩阵仍含占位内容", titles)
 
+    def test_keywords_require_five_chinese_semicolon_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{模型；检验；结果}摘要\end{cumcmabstract}
+\section{问题分析}任务、数据、模型、求解和验证。
+\section{模型假设}一条必要假设。
+\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            self.assertIn("摘要关键词格式不符合五项中文分号规范", {item.title for item in issues})
+
+    def test_formula_symbols_may_be_global_or_locally_explained(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}
+\section{问题分析}任务输出、附件数据与可识别性、难点风险、备选方案取舍、预处理求解、验证方案、前后问依赖和结论边界。
+\section{模型假设}假设只改变一条约束。
+\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
+\section{模型建立}
+\begin{equation}x=y+z\end{equation}
+其中，\(y\) 为观测量，\(z\) 为修正量。
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            self.assertNotIn("展示公式存在未说明符号", {item.title for item in issues})
+
+    def test_unexplained_formula_symbol_is_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}
+\section{问题分析}任务输出、附件数据、模型求解与验证。
+\section{模型假设}假设只改变一条约束。
+\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
+\section{模型建立}\begin{equation}x=y+z\end{equation}
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            self.assertIn("展示公式存在未说明符号", {item.title for item in issues})
+
+    def test_assumption_pile_and_figure_width_variation_are_warned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            assumptions = "\\begin{enumerate}" + "\\item 必要假设" * 7 + "\\end{enumerate}"
+            tex = (
+                r"\begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}"
+                r"\section{问题分析}任务输出、数据识别、难点风险、备选取舍、预处理求解、验证、依赖和边界。"
+                r"\section{模型假设}" + assumptions +
+                r"\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule"
+                r"\includegraphics[width=.6\textwidth]{a.pdf}"
+                r"\includegraphics[width=.7\textwidth]{b.pdf}"
+                r"\includegraphics[width=.8\textwidth]{c.pdf}"
+            )
+            sources = [source(main, tex)]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            titles = {item.title for item in issues}
+            self.assertIn("模型假设数量偏多", titles)
+            self.assertIn("图片宽度规格过多", titles)
+
+    def test_incomplete_problem_analysis_is_warned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}
+\section{问题分析}选择一个模型求解。
+\section{模型假设}必要假设。
+\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            self.assertIn("问题分析没有形成完整建模决策链", {item.title for item in issues})
+
     def test_clean_fixture_has_no_blocking_issue(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -309,8 +429,14 @@ class AuditTests(unittest.TestCase):
 \documentclass[a4paper]{ctexart}
 \usepackage[margin=2.5cm]{geometry}
 \begin{document}
-\begin{cumcmabstract}{稳健性；检验}针对问题一，模型得到 12.3，并完成误差检验。\end{cumcmabstract}
+\begin{cumcmabstract}{稳健性；检验；模型；结果；边界}针对问题一，模型得到 12.3，并完成误差检验。\end{cumcmabstract}
 \label{cumcm:abstract-end}
+\section{问题分析}
+任务输出基于附件数据；说明可识别性、难点风险、备选方案取舍、预处理求解、验证方案、前后问依赖和结论边界。
+\section{模型假设}
+仅保留会改变约束的一条必要假设。
+\section{符号说明}
+\begin{tabular}{ccc}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule\end{tabular}
 \section{问题一的模型建立与求解}
 人工智能工具使用说明见文献\cite{ai-tool}。模型依据中文研究\cite{model-zh}
 与 English study\cite{model-en}，参数与停止条件均已记录。

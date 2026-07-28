@@ -20,7 +20,7 @@
 \RequirePackage{booktabs,tabularx,array,longtable,threeparttable}
 \RequirePackage{siunitx}
 \RequirePackage{caption,subcaption}
-\RequirePackage{float,placeins}
+\RequirePackage{float,placeins,needspace}
 \RequirePackage{xcolor}
 \RequirePackage{enumitem}
 \RequirePackage{listings}
@@ -147,7 +147,7 @@
   \begin{quotation}
 }{%
   \par\medskip
-  \noindent{\heiti 关键词：}\cumcm@keywords
+  \noindent{\heiti 关键词：}\hspace{0.5em}\cumcm@keywords
   \end{quotation}
   \label{cumcm:abstract-end}
 }
@@ -165,6 +165,8 @@
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \newcolumntype{C}{>{\centering\arraybackslash}X}
 \newcolumntype{R}{>{\raggedleft\arraybackslash}X}
+\newcommand{\CumcmFigureWidth}{0.82\textwidth}
+\newcommand{\CumcmWideFigureWidth}{0.92\textwidth}
 
 \renewcommand{\refname}{参考文献}
 \graphicspath{{texfile/figures/}}

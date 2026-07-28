@@ -159,15 +159,16 @@ def add_pattern_issue(
         )
 
 
-def resolve_asset(main_dir: Path, raw: str) -> Path | None:
-    candidate = (main_dir / raw).resolve()
-    if candidate.is_file():
-        return candidate
-    if candidate.suffix == "":
-        for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".eps"):
-            with_suffix = candidate.with_suffix(suffix)
-            if with_suffix.is_file():
-                return with_suffix
+def resolve_asset(main_dir: Path, raw: str, extra_dirs: tuple[Path, ...] = ()) -> Path | None:
+    for root in (main_dir, *extra_dirs):
+        candidate = (root / raw).resolve()
+        if candidate.is_file():
+            return candidate
+        if candidate.suffix == "":
+            for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".eps"):
+                with_suffix = candidate.with_suffix(suffix)
+                if with_suffix.is_file():
+                    return with_suffix
     return None
 
 
@@ -176,11 +177,18 @@ def check_assets(main_tex: Path, sources: list[SourceFile], issues: list[Issue])
         (r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}", "图片"),
         (r"\\lstinputlisting(?:\[[^\]]*\])?\{([^}]+)\}", "代码文件"),
     )
+    all_text = combined_text(sources)
+    graphic_dirs: list[Path] = []
+    for declaration in re.findall(r"\\graphicspath\{((?:\{[^}]+\})+)\}", all_text):
+        for raw_dir in re.findall(r"\{([^}]+)\}", declaration):
+            graphic_dirs.append((main_tex.parent / raw_dir).resolve())
     for source in sources:
+        search_dirs = (source.path.parent.resolve(), *graphic_dirs)
         for pattern, kind in patterns:
             for match in re.finditer(pattern, source.text):
                 raw = match.group(1)
-                if resolve_asset(main_tex.parent, raw) is None:
+                asset = resolve_asset(main_tex.parent, raw, search_dirs)
+                if asset is None:
                     issues.append(
                         Issue(
                             "硬错误",
@@ -189,9 +197,23 @@ def check_assets(main_tex: Path, sources: list[SourceFile], issues: list[Issue])
                             f"修正路径或补齐{kind}，再重新编译。",
                         )
                     )
+                elif kind == "图片" and asset.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+                    try:
+                        from PIL import Image
+                        with Image.open(asset) as raster:
+                            width_px, height_px = raster.size
+                        if width_px < 1200 or height_px < 600:
+                            issues.append(
+                                Issue(
+                                    "质量警告",
+                                    "位图分辨率可能不足",
+                                    f"{asset}：{width_px} × {height_px} px",
+                                    "优先换成矢量 PDF；位图在最终尺寸下建议达到 300 dpi，并逐页确认文字和线条清晰。",
+                                )
+                            )
+                    except (ImportError, OSError):
+                        pass
                 elif kind == "代码文件":
-                    asset = resolve_asset(main_tex.parent, raw)
-                    assert asset is not None
                     code = asset.read_text(encoding="utf-8", errors="replace")
                     placeholder_code = re.search(
                         r"NotImplementedError|Replace this placeholder|TODO\s*:\s*replace",
@@ -585,11 +607,11 @@ def check_pdf(main_tex: Path, pdf_path: Path | None, issues: list[Issue]) -> Non
     reference_page = None
     for page_number, page in enumerate(reader.pages, 1):
         page_text = page.extract_text() or ""
-        position = page_text.find("参考文献")
-        if position < 0:
+        heading = re.search(r"(?m)^\s*参考文献\s*$", page_text)
+        if heading is None:
             continue
         reference_page = page_number
-        prefix = re.sub(r"[\s\d]+", "", page_text[:position])
+        prefix = re.sub(r"[\s\d]+", "", page_text[: heading.start()])
         if len(prefix) > 8:
             issues.append(
                 Issue(
@@ -824,9 +846,191 @@ def check_results(results_path: Path | None, sources: list[SourceFile], issues: 
             )
 
 
+
+GREEK_SYMBOL_NAMES = {
+    "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta",
+    "theta", "vartheta", "iota", "kappa", "lambda", "mu", "nu", "xi", "pi", "rho",
+    "sigma", "tau", "upsilon", "phi", "varphi", "chi", "psi", "omega",
+    "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
+}
+
+
+def math_symbol_tokens(raw: str) -> set[str]:
+    """Extract conservative variable tokens from a LaTeX math fragment."""
+    cleaned = re.sub(r"\\(?:label|tag|ref|eqref)\{[^{}]*\}", " ", raw)
+    cleaned = re.sub(r"\\(?:text|mathrm|operatorname)\{[^{}]*\}", " ", cleaned)
+    greek = {
+        match.group(1)
+        for match in re.finditer(r"\\([A-Za-z]+)", cleaned)
+        if match.group(1) in GREEK_SYMBOL_NAMES
+    }
+    cleaned = re.sub(r"\\[A-Za-z]+\*?", " ", cleaned)
+    latin = set(re.findall(r"(?<![A-Za-z])[A-Za-z](?![A-Za-z])", cleaned))
+    return latin | greek
+
+
+def symbol_table_tokens(text: str) -> set[str]:
+    match = re.search(r"\\section\{符号说明\}(.*?)(?=\\section\{|\\appendix|\Z)", text, re.S)
+    if not match:
+        return set()
+    tokens: set[str] = set()
+    for row in re.split(r"\\\\", match.group(1)):
+        if "&" not in row:
+            continue
+        first_cell = row.split("&", 1)[0]
+        for math in re.findall(r"\$(.+?)\$|\\\((.+?)\\\)", first_cell, re.S):
+            tokens.update(math_symbol_tokens(math[0] or math[1]))
+    return tokens
+
+
+def displayed_formulae(text: str):
+    patterns = (
+        r"\\begin\{(?:equation|align|gather|multline|split)\*?\}(.*?)\\end\{(?:equation|align|gather|multline|split)\*?\}",
+        r"\\\[(.*?)\\\]",
+    )
+    found = []
+    for pattern in patterns:
+        found.extend((m.start(), m.end(), m.group(1)) for m in re.finditer(pattern, text, re.S))
+    return sorted(found)
+
+
+def section_body(text: str, title: str) -> str:
+    match = re.search(rf"\\section\{{{re.escape(title)}\}}(.*?)(?=\\section\{{|\\appendix|\Z)", text, re.S)
+    return match.group(1) if match else ""
+
 def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
     content_sources = [source for source in sources if source.path.suffix.lower() == ".tex"]
     text = combined_text(content_sources)
+
+    abstract_match = re.search(r"\\begin\{cumcmabstract\}\{([^{}]*)\}", text)
+    if abstract_match:
+        keywords = [item.strip() for item in abstract_match.group(1).split("；")]
+        if len(keywords) != 5 or any(not item for item in keywords) or ";" in abstract_match.group(1):
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "摘要关键词格式不符合五项中文分号规范",
+                    abstract_match.group(1),
+                    "改为：关键词：关键词 1；关键词 2；关键词 3；关键词 4；关键词 5。",
+                )
+            )
+    else:
+        issues.append(Issue("硬错误", "缺少标准摘要环境", "未找到 cumcmabstract", "使用模板摘要环境并填写五个关键词。"))
+
+    problem_analysis = section_body(text, "问题分析")
+    if not problem_analysis:
+        issues.append(Issue("硬错误", "缺少独立的问题分析章节", "未找到 \\section{问题分析}", "将问题分析作为正文第二节。"))
+    else:
+        plain_analysis = re.sub(r"\\[A-Za-z]+\*?(?:\[[^]]*\])?(?:\{[^{}]*\})?", "", problem_analysis)
+        groups = {
+            "任务输出": r"任务|目标|输出|要求",
+            "数据与可识别性": r"数据|附件|字段|信息|识别|边界|能说明|不能说明",
+            "难点与风险": r"难点|风险|异常|缺失|偏差",
+            "备选方案取舍": r"备选|取舍|相比|选择|不采用|舍弃",
+            "预处理与求解": r"预处理|清洗|特征|求解|算法|步骤",
+            "验证方案": r"验证|检验|误差|稳健|敏感|对照",
+            "问题依赖": r"依赖|复用|前问|后问|递进",
+            "结论边界": r"结论边界|适用范围|仅基于|不能证明|不能说明",
+        }
+        missing_groups = [name for name, pattern in groups.items() if not re.search(pattern, plain_analysis)]
+        chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", plain_analysis))
+        if chinese_chars < 250 or len(missing_groups) >= 3:
+            issues.append(
+                Issue(
+                    "质量警告",
+                    "问题分析没有形成完整建模决策链",
+                    f"约 {chinese_chars} 个汉字；缺少：{'、'.join(missing_groups) or '无'}",
+                    "逐问补充任务输出、数据可识别性、难点风险、备选取舍、预处理求解、验证、依赖和结论边界。",
+                )
+            )
+
+    assumptions = section_body(text, "模型假设")
+    symbols = section_body(text, "符号说明")
+    if not assumptions or not symbols:
+        issues.append(
+            Issue(
+                "硬错误",
+                "模型假设与符号说明未独立成第三、第四节",
+                "需要 \\section{模型假设} 和 \\section{符号说明}",
+                "保持工程结构不变，在同一章节文件中拆成两个独立 section。",
+            )
+        )
+    else:
+        item_count = len(re.findall(r"\\item\b", assumptions))
+        if not item_count:
+            item_count = len(re.findall(r"(?m)^\s*\d+[\.、．]\s*", assumptions))
+        if item_count > 6:
+            issues.append(
+                Issue(
+                    "质量警告",
+                    "模型假设数量偏多",
+                    f"检测到 {item_count} 条假设",
+                    "默认压缩为 3--6 条，只保留会改变模型关系、约束或适用边界的假设。",
+                )
+            )
+        symbol_table_ok = all(token in symbols for token in ("\\toprule", "\\midrule", "\\bottomrule"))
+        headers_ok = all(label in symbols for label in ("符号定义", "符号说明", "单位"))
+        if not symbol_table_ok or not headers_ok:
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "符号说明不是规定的三列三线表",
+                    "缺少三线命令或“符号定义、符号说明、单位”列名",
+                    "在第四节使用 booktabs 三线表，列名固定为符号定义、符号说明、单位。",
+                )
+            )
+
+    global_symbols = symbol_table_tokens(text)
+    for start, end, formula in displayed_formulae(text):
+        formula_symbols = math_symbol_tokens(formula)
+        if not formula_symbols:
+            continue
+        following = text[end : end + 600]
+        following = re.split(r"\\(?:section|subsection|begin\{(?:equation|align|gather|multline))", following, maxsplit=1)[0]
+        local_symbols: set[str] = set()
+        if "其中" in following:
+            for pair in re.findall(r"\$(.+?)\$|\\\((.+?)\\\)", following, re.S):
+                local_symbols.update(math_symbol_tokens(pair[0] or pair[1]))
+        missing = sorted(formula_symbols - global_symbols - local_symbols)
+        if missing:
+            line = text.count("\n", 0, start) + 1
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "展示公式存在未说明符号",
+                    f"约第 {line} 行：{', '.join(missing)}",
+                    "把重要符号加入第四节三线表；其余符号在该公式后立即用“其中，符号为……”逐项说明。",
+                )
+            )
+
+    graphics = re.findall(r"\\includegraphics(?:\[([^]]*)\])?\{[^}]+\}", text)
+    graphic_widths = []
+    missing_width = 0
+    for options in graphics:
+        width = re.search(r"width\s*=\s*([^,]+)", options or "")
+        if width:
+            graphic_widths.append(re.sub(r"\s+", "", width.group(1)))
+        else:
+            missing_width += 1
+    if missing_width:
+        issues.append(
+            Issue(
+                "质量警告",
+                "图片未显式使用统一宽度",
+                f"{missing_width} 张图片缺少 width 参数",
+                "同类单图默认使用 width=\\CumcmFigureWidth，并在最终 PDF 中检查清晰度。",
+            )
+        )
+    if len(set(graphic_widths)) > 2:
+        issues.append(
+            Issue(
+                "质量警告",
+                "图片宽度规格过多",
+                "检测到：" + "、".join(sorted(set(graphic_widths))),
+                "将同类图统一为 \\CumcmFigureWidth；仅为高信息密度横图保留 \\CumcmWideFigureWidth。",
+            )
+        )
+
     placeholder = re.search(
         r"\[(?:请|写明|替换|关键词|单位|使用环节|受影响|逐问|完整可运行|跨章节|论文标题|摘要应|说明)",
         text,
