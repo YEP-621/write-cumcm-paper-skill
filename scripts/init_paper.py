@@ -57,6 +57,30 @@ def problem_section(template: str, number: int) -> str:
     )
 
 
+def replace_marker_block(text: str, start_marker: str, end_marker: str, content: str) -> str:
+    start = text.index(start_marker) + len(start_marker)
+    end = text.index(end_marker)
+    return text[:start] + "\n" + content.rstrip() + "\n" + text[end:]
+
+
+def question_restatement(number: int) -> str:
+    chinese = CHINESE_NUMERALS[number]
+    return (
+        f"\\noindent\\textbf{{问题{chinese}：}}"
+        "[说明本问给定信息、需要建立的模型和必须输出的结果。]"
+    )
+
+
+def question_analysis(number: int) -> str:
+    chinese = CHINESE_NUMERALS[number]
+    return (
+        f"\\subsection{{问题{chinese}}}\n\n"
+        "[说明本问的任务输出、数据及可识别性、所有关键疑点、异常与风险、"
+        "可能路线及取舍、主模型选择、预处理与求解方向、验证方案、"
+        "与其他问题的依赖及结论边界。]"
+    )
+
+
 def main() -> int:
     args = parse_args()
     skill_dir = Path(__file__).resolve().parent.parent
@@ -76,32 +100,49 @@ def main() -> int:
     shutil.copytree(template_dir, destination, dirs_exist_ok=True)
 
     texfile = destination / "texfile"
+    question_numbers = range(1, args.questions + 1)
+
+    description_path = texfile / "2ProblemDescription.tex"
+    description_text = description_path.read_text(encoding="utf-8")
+    description_text = replace_marker_block(
+        description_text,
+        "% <CUMCM:QUESTION_RESTATEMENTS>",
+        "% </CUMCM:QUESTION_RESTATEMENTS>",
+        "\n\n".join(question_restatement(number) for number in question_numbers),
+    )
+    description_path.write_text(description_text, encoding="utf-8")
+
+    analysis_path = texfile / "3ProblemAnalysis.tex"
+    analysis_text = analysis_path.read_text(encoding="utf-8")
+    analysis_text = replace_marker_block(
+        analysis_text,
+        "% <CUMCM:QUESTION_ANALYSES>",
+        "% </CUMCM:QUESTION_ANALYSES>",
+        "\n\n".join(question_analysis(number) for number in question_numbers),
+    )
+    analysis_path.write_text(analysis_text, encoding="utf-8")
+
     base_problem = texfile / "5Problem1.tex"
     base_text = base_problem.read_text(encoding="utf-8")
     include_lines: list[str] = []
 
-    for number in range(1, args.questions + 1):
-        path = texfile / f"5Problem{number}.tex"
-        path.write_text(problem_section(base_text, number), encoding="utf-8")
-        include_lines.append(f"\\input{{texfile/{path.stem}}}")
+    for number in question_numbers:
+        problem_path = texfile / f"5Problem{number}.tex"
+        problem_path.write_text(problem_section(base_text, number), encoding="utf-8")
+        include_lines.append(f"\\input{{texfile/{problem_path.stem}}}")
 
-    for path in texfile.glob("5Problem*.tex"):
-        suffix = path.stem.removeprefix("5Problem")
+    for problem_path in texfile.glob("5Problem*.tex"):
+        suffix = problem_path.stem.removeprefix("5Problem")
         if suffix.isdigit() and int(suffix) > args.questions:
-            path.unlink()
+            problem_path.unlink()
 
     main_tex = destination / "document.tex"
     main_text = main_tex.read_text(encoding="utf-8")
-    start_marker = "% <CUMCM:PROBLEM_INPUTS>"
-    end_marker = "% </CUMCM:PROBLEM_INPUTS>"
-    start = main_text.index(start_marker) + len(start_marker)
-    end = main_text.index(end_marker)
-    main_text = (
-        main_text[:start]
-        + "\n"
-        + "\n".join(include_lines)
-        + "\n"
-        + main_text[end:]
+    main_text = replace_marker_block(
+        main_text,
+        "% <CUMCM:PROBLEM_INPUTS>",
+        "% </CUMCM:PROBLEM_INPUTS>",
+        "\n".join(include_lines),
     )
     main_tex.write_text(main_text, encoding="utf-8")
 

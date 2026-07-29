@@ -870,7 +870,7 @@ def math_symbol_tokens(raw: str) -> set[str]:
 
 
 def symbol_table_tokens(text: str) -> set[str]:
-    match = re.search(r"\\section\{符号说明\}(.*?)(?=\\section\{|\\appendix|\Z)", text, re.S)
+    match = re.search(r"\\section\{定义与符号说明\}(.*?)(?=\\section\{|\\appendix|\Z)", text, re.S)
     if not match:
         return set()
     tokens: set[str] = set()
@@ -917,6 +917,54 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
     else:
         issues.append(Issue("硬错误", "缺少标准摘要环境", "未找到 cumcmabstract", "使用模板摘要环境并填写五个关键词。"))
 
+    expected_sections = [
+        "问题描述",
+        "问题分析",
+        "模型假设",
+        "定义与符号说明",
+        "模型的建立与求解",
+        "模型的评价",
+    ]
+    section_positions = {
+        title: text.find(f"\\section{{{title}}}") for title in expected_sections
+    }
+    missing_sections = [title for title, position in section_positions.items() if position < 0]
+    present_positions = [section_positions[title] for title in expected_sections if section_positions[title] >= 0]
+    wrong_order = present_positions != sorted(present_positions)
+    if missing_sections or wrong_order:
+        evidence = (
+            "缺少：" + "、".join(missing_sections)
+            if missing_sections
+            else "六个编号章节顺序不符合固定框架"
+        )
+        issues.append(
+            Issue(
+                "硬错误",
+                "正文六个编号章节不符合固定框架",
+                evidence,
+                "依次使用：问题描述、问题分析、模型假设、定义与符号说明、模型的建立与求解、模型的评价。",
+            )
+        )
+
+    problem_description = section_body(text, "问题描述")
+    description_titles = ("问题背景", "问题重述")
+    description_positions = [
+        problem_description.find(f"\\subsection{{{title}}}")
+        for title in description_titles
+    ]
+    if problem_description and (
+        any(position < 0 for position in description_positions)
+        or description_positions != sorted(description_positions)
+    ):
+        issues.append(
+            Issue(
+                "硬错误",
+                "问题描述缺少固定二级结构或顺序错误",
+                "需要依次设置 1.1 问题背景和 1.2 问题重述",
+                "在问题描述内依次设置问题背景、问题重述，并在问题重述中逐问说明任务。",
+            )
+        )
+
     problem_analysis = section_body(text, "问题分析")
     if not problem_analysis:
         issues.append(Issue("硬错误", "缺少独立的问题分析章节", "未找到 \\section{问题分析}", "将问题分析作为正文第二节。"))
@@ -943,15 +991,141 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
                     "逐问补充任务输出、数据可识别性、难点风险、备选取舍、预处理求解、验证、依赖和结论边界。",
                 )
             )
+        analysis_matches = list(
+            re.finditer(r"\\subsection\{问题([一二三四五六七八九十\d]+)\}", problem_analysis)
+        )
+        for index, match in enumerate(analysis_matches):
+            question = match.group(1)
+            end = analysis_matches[index + 1].start() if index + 1 < len(analysis_matches) else len(problem_analysis)
+            block = problem_analysis[match.end() : end]
+            plain_block = re.sub(r"\\[A-Za-z]+\*?(?:\[[^]]*\])?(?:\{[^{}]*\})?", "", block)
+            missing_for_question = [
+                name for name, pattern in groups.items() if not re.search(pattern, plain_block)
+            ]
+            question_chars = len(re.findall(r"[\u4e00-\u9fff]", plain_block))
+            if question_chars < 180 or len(missing_for_question) >= 3:
+                issues.append(
+                    Issue(
+                        "质量警告",
+                        f"问题{question}分析不够完整",
+                        f"约 {question_chars} 个汉字；缺少：{'、'.join(missing_for_question) or '无'}",
+                        "补充本问的关键疑点、可能方向、取舍理由、求解验证和结论边界；篇幅服从论证需要，不机械压缩。",
+                    )
+                )
+
+    analysis_questions = set(
+        re.findall(r"\\subsection\{问题([一二三四五六七八九十\d]+)\}", problem_analysis)
+    )
+    modeling = section_body(text, "模型的建立与求解")
+    model_matches = list(
+        re.finditer(
+            r"\\subsection\{问题([一二三四五六七八九十\d]+)的模型建立与求解\}",
+            modeling,
+        )
+    )
+    model_questions = {match.group(1) for match in model_matches}
+    restated_questions = set(
+        re.findall(r"\\textbf\{问题([一二三四五六七八九十\d]+)：\}", problem_description)
+    )
+    if not model_matches:
+        issues.append(
+            Issue(
+                "硬错误",
+                "模型建立与求解章没有逐问结构",
+                "未找到 5.1 问题一的模型建立与求解等二级标题",
+                "至少为一个子问题建立对应的逐问建模与求解二级标题。",
+            )
+        )
+    if model_matches:
+        preprocessing = modeling[: model_matches[0].start()]
+        if "数据预处理" not in preprocessing:
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "模型建立与求解章缺少总数据预处理",
+                    "第一处逐问建模节之前未找到“数据预处理”",
+                    "在第五节开头先写各问共用的数据预处理；问题特定处理放入对应问题。",
+                )
+            )
+        for index, match in enumerate(model_matches):
+            question = match.group(1)
+            end = model_matches[index + 1].start() if index + 1 < len(model_matches) else len(modeling)
+            block = modeling[match.end() : end]
+            required = (
+                "模型的建立",
+                "模型的求解",
+                "模型的计算结果",
+                f"问题{question}结果验证与解释",
+            )
+            child_positions = [
+                block.find(f"\\subsubsection{{{title}}}") for title in required
+            ]
+            missing = [
+                title for title, position in zip(required, child_positions) if position < 0
+            ]
+            wrong_child_order = (
+                not missing and child_positions != sorted(child_positions)
+            )
+            if missing or wrong_child_order:
+                evidence = (
+                    "缺少：" + "、".join(missing)
+                    if missing
+                    else "四个三级标题顺序错误"
+                )
+                issues.append(
+                    Issue(
+                        "硬错误",
+                        f"问题{question}的建模求解层级不完整或顺序错误",
+                        evidence,
+                        "每问先写总览，再固定设置模型的建立、模型的求解、模型的计算结果、该问结果验证与解释。",
+                    )
+                )
+    if not (restated_questions == analysis_questions == model_questions):
+        issues.append(
+            Issue(
+                "硬错误",
+                "问题重述、问题分析与逐问建模没有一一对应",
+                f"重述问题：{sorted(restated_questions)}；分析问题：{sorted(analysis_questions)}；建模问题：{sorted(model_questions)}",
+                "为每个子问题同时建立对应的逐问重述、问题分析二级标题和模型建立与求解二级标题。",
+            )
+        )
+
+    evaluation = section_body(text, "模型的评价")
+    if evaluation:
+        evaluation_titles = ("模型的优点", "模型的缺点", "模型的推广")
+        evaluation_positions = [
+            evaluation.find(f"\\subsection{{{title}}}") for title in evaluation_titles
+        ]
+        missing_evaluation = [
+            title for title, position in zip(evaluation_titles, evaluation_positions)
+            if position < 0
+        ]
+        wrong_evaluation_order = (
+            not missing_evaluation and evaluation_positions != sorted(evaluation_positions)
+        )
+        if missing_evaluation or wrong_evaluation_order:
+            evidence = (
+                "缺少：" + "、".join(missing_evaluation)
+                if missing_evaluation
+                else "三个二级标题顺序错误"
+            )
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "模型评价缺少固定二级结构或顺序错误",
+                    evidence,
+                    "在第六节依次设置模型的优点、模型的缺点和模型的推广。",
+                )
+            )
 
     assumptions = section_body(text, "模型假设")
-    symbols = section_body(text, "符号说明")
+    symbols = section_body(text, "定义与符号说明")
     if not assumptions or not symbols:
         issues.append(
             Issue(
                 "硬错误",
-                "模型假设与符号说明未独立成第三、第四节",
-                "需要 \\section{模型假设} 和 \\section{符号说明}",
+                "模型假设与定义和符号说明未独立成第三、第四节",
+                "需要 \\section{模型假设} 和 \\section{定义与符号说明}",
                 "保持工程结构不变，在同一章节文件中拆成两个独立 section。",
             )
         )
@@ -974,9 +1148,9 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
             issues.append(
                 Issue(
                     "硬错误",
-                    "符号说明不是规定的三列三线表",
+                    "定义与符号说明不是规定的三列三线表",
                     "缺少三线命令或“符号定义、符号说明、单位”列名",
-                    "在第四节使用 booktabs 三线表，列名固定为符号定义、符号说明、单位。",
+                    "在第四节“定义与符号说明”使用 booktabs 三线表，列名固定为符号定义、符号说明、单位。",
                 )
             )
 
@@ -986,7 +1160,7 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
         if not formula_symbols:
             continue
         following = text[end : end + 600]
-        following = re.split(r"\\(?:section|subsection|begin\{(?:equation|align|gather|multline))", following, maxsplit=1)[0]
+        following = re.split(r"\\(?:section|subsection|subsubsection|begin\{(?:equation|align|gather|multline))", following, maxsplit=1)[0]
         local_symbols: set[str] = set()
         if "其中" in following:
             for pair in re.findall(r"\$(.+?)\$|\\\((.+?)\\\)", following, re.S):
@@ -1032,13 +1206,13 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
         )
 
     placeholder = re.search(
-        r"\[(?:请|写明|替换|关键词|单位|使用环节|受影响|逐问|完整可运行|跨章节|论文标题|摘要应|说明)",
+        r"\[(?:请|写明|替换|关键词|单位|使用环节|受影响|逐问|完整可运行|跨章节|论文标题|摘要应|说明|压缩|本节|先|集中|选择|优点|指出)",
         text,
     )
     if placeholder:
         source_match = find_first(
             content_sources,
-            r"\[(?:请|写明|替换|关键词|单位|使用环节|受影响|逐问|完整可运行|跨章节|论文标题|摘要应|说明)",
+            r"\[(?:请|写明|替换|关键词|单位|使用环节|受影响|逐问|完整可运行|跨章节|论文标题|摘要应|说明|压缩|本节|先|集中|选择|优点|指出)",
         )
         assert source_match
         source, match = source_match
@@ -1050,14 +1224,14 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
                 "用真实内容替换全部占位文字，并再次搜索方括号提示。",
             )
         )
-    problem_sections = len(re.findall(r"\\section\{问题[一二三四五六七八九十\d]+", text))
+    problem_sections = len(re.findall(r"\\subsection\{问题[一二三四五六七八九十\d]+的模型建立与求解", text))
     abstract_targets = len(re.findall(r"针对问题[一二三四五六七八九十\d]+", text))
     if problem_sections and abstract_targets < problem_sections:
         issues.append(
             Issue(
                 "质量警告",
                 "摘要没有逐个覆盖所有子问题",
-                f"正文问题节 {problem_sections} 个，摘要明确覆盖 {abstract_targets} 个",
+                f"正文问题建模节 {problem_sections} 个，摘要明确覆盖 {abstract_targets} 个",
                 "逐问补充方法、问题特定处理、关键结果和可信性证据。",
             )
         )

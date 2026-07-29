@@ -38,8 +38,10 @@
   {\setCJKmainfont[AutoFakeBold=2.5]{SimSun}}
   {\setCJKmainfont[AutoFakeBold=2.5]{FandolSong-Regular}}
 \IfFontExistsTF{SimHei}
-  {\setCJKsansfont[AutoFakeBold=2.5]{SimHei}}
-  {\setCJKsansfont[AutoFakeBold=2.5]{FandolHei-Regular}}
+  {\setCJKsansfont[AutoFakeBold=2.5]{SimHei}
+   \newCJKfontfamily\cumcmhei[AutoFakeBold=2.5]{SimHei}}
+  {\setCJKsansfont[AutoFakeBold=2.5]{FandolHei-Regular}
+   \newCJKfontfamily\cumcmhei[AutoFakeBold=2.5]{FandolHei-Regular}}
 \IfFontExistsTF{KaiTi}
   {\newCJKfontfamily\cumcmkai[AutoFakeBold=2.5]{KaiTi}}
   {\newCJKfontfamily\cumcmkai[AutoFakeBold=2.5]{FandolKai-Regular}}
@@ -63,7 +65,7 @@
 
 \pagestyle{fancy}
 \fancyhf{}
-\fancyfoot[C]{\thepage}
+\fancyfoot[C]{\zihao{-5}\thepage}
 \renewcommand{\headrulewidth}{0pt}
 \renewcommand{\footrulewidth}{0pt}
 
@@ -85,27 +87,29 @@
 
 \ctexset{
   section = {
-    format = \centering\bfseries\Large,
+    format = \centering\cumcmhei\bfseries\zihao{3},
     name = {,、},
+    aftername = {},
     number = \chinese{section},
     beforeskip = 3.5ex plus 1ex minus .2ex,
     afterskip = 2.3ex plus .2ex
   },
   subsection = {
-    format = \bfseries\large,
+    format = \cumcmhei\bfseries\zihao{-4},
     beforeskip = 3.25ex plus 1ex minus .2ex,
     afterskip = 1.5ex plus .2ex
   },
   subsubsection = {
-    format = \bfseries\normalsize,
+    format = \cumcmhei\bfseries\zihao{-4},
     beforeskip = 3.25ex plus 1ex minus .2ex,
     afterskip = 1.5ex plus .2ex
   }
 }
 
+\DeclareCaptionFont{cumcmcaption}{\zihao{5}}
 \captionsetup{
   format=hang,
-  font={small,bf},
+  font=cumcmcaption,
   labelsep=quad,
   justification=centering,
   singlelinecheck=true
@@ -139,9 +143,9 @@
 \makeatletter
 \newenvironment{cumcmabstract}[1]{%
   \begin{center}
-    {\zihao{3}\bfseries\@title\par}
+    {\cumcmhei\zihao{3}\bfseries\@title\par}
     \vspace{1ex}
-    {\zihao{4}\bfseries 摘要\par}
+    {\cumcmhei\zihao{4}\bfseries 摘要\par}
   \end{center}
   \def\cumcm@keywords{#1}%
   \begin{quotation}
@@ -169,6 +173,7 @@
 \newcommand{\CumcmWideFigureWidth}{0.92\textwidth}
 
 \renewcommand{\refname}{参考文献}
+\renewcommand{\bibsection}{\section*{\cumcmhei\zihao{4}\bfseries\refname}}
 \graphicspath{{texfile/figures/}}
 
 \endinput

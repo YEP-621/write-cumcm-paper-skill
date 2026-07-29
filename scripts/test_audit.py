@@ -350,7 +350,7 @@ class AuditTests(unittest.TestCase):
 \begin{cumcmabstract}{模型；检验；结果}摘要\end{cumcmabstract}
 \section{问题分析}任务、数据、模型、求解和验证。
 \section{模型假设}一条必要假设。
-\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
+\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
 """)]
             issues: list[audit.Issue] = []
             audit.check_quality(sources, issues)
@@ -363,7 +363,7 @@ class AuditTests(unittest.TestCase):
 \begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}
 \section{问题分析}任务输出、附件数据与可识别性、难点风险、备选方案取舍、预处理求解、验证方案、前后问依赖和结论边界。
 \section{模型假设}假设只改变一条约束。
-\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
+\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
 \section{模型建立}
 \begin{equation}x=y+z\end{equation}
 其中，\(y\) 为观测量，\(z\) 为修正量。
@@ -379,7 +379,7 @@ class AuditTests(unittest.TestCase):
 \begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}
 \section{问题分析}任务输出、附件数据、模型求解与验证。
 \section{模型假设}假设只改变一条约束。
-\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
+\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
 \section{模型建立}\begin{equation}x=y+z\end{equation}
 """)]
             issues: list[audit.Issue] = []
@@ -394,7 +394,7 @@ class AuditTests(unittest.TestCase):
                 r"\begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}"
                 r"\section{问题分析}任务输出、数据识别、难点风险、备选取舍、预处理求解、验证、依赖和边界。"
                 r"\section{模型假设}" + assumptions +
-                r"\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule"
+                r"\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule"
                 r"\includegraphics[width=.6\textwidth]{a.pdf}"
                 r"\includegraphics[width=.7\textwidth]{b.pdf}"
                 r"\includegraphics[width=.8\textwidth]{c.pdf}"
@@ -413,11 +413,36 @@ class AuditTests(unittest.TestCase):
 \begin{cumcmabstract}{模型；检验；结果；稳健性；边界}摘要\end{cumcmabstract}
 \section{问题分析}选择一个模型求解。
 \section{模型假设}必要假设。
-\section{符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
+\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
 """)]
             issues: list[audit.Issue] = []
             audit.check_quality(sources, issues)
             self.assertIn("问题分析没有形成完整建模决策链", {item.title for item in issues})
+
+    def test_fixed_framework_requires_matching_question_levels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{模型；求解；结果；验证；边界}针对问题一给出结果。\end{cumcmabstract}
+\section{问题描述}
+\subsection{问题背景}背景。
+\subsection{问题重述}\textbf{问题一：}完成任务。
+\section{问题分析}\subsection{问题一}仅作简短分析。
+\section{模型假设}必要假设。
+\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule
+\section{模型的建立与求解}
+\subsection{问题二的模型建立与求解}
+\subsubsection{模型的建立}模型。
+\section{模型的评价}
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            titles = {item.title for item in issues}
+            self.assertIn("问题重述、问题分析与逐问建模没有一一对应", titles)
+            self.assertIn("问题一分析不够完整", titles)
+            self.assertIn("模型建立与求解章缺少总数据预处理", titles)
+            self.assertIn("问题二的建模求解层级不完整或顺序错误", titles)
+            self.assertIn("模型评价缺少固定二级结构或顺序错误", titles)
 
     def test_clean_fixture_has_no_blocking_issue(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -431,15 +456,31 @@ class AuditTests(unittest.TestCase):
 \begin{document}
 \begin{cumcmabstract}{稳健性；检验；模型；结果；边界}针对问题一，模型得到 12.3，并完成误差检验。\end{cumcmabstract}
 \label{cumcm:abstract-end}
+\section{问题描述}
+\subsection{问题背景}说明研究对象与现实任务。
+\subsection{问题重述}\textbf{问题一：}根据附件数据建立模型并输出结果。
 \section{问题分析}
-任务输出基于附件数据；说明可识别性、难点风险、备选方案取舍、预处理求解、验证方案、前后问依赖和结论边界。
+\subsection{问题一}
+任务输出基于附件数据；说明数据字段与可识别性、关键疑点、异常缺失和偏差风险；比较备选方案并解释取舍，选择主模型；说明预处理、特征构造、求解算法和验证方案；交代前后问依赖、结论边界与适用范围。进一步讨论输入输出、模型条件、对照检验和失败情形，使分析能够对应后续建模。
 \section{模型假设}
 仅保留会改变约束的一条必要假设。
-\section{符号说明}
+\section{定义与符号说明}
+便于后续模型建立与求解，本文基于上述问题分析与模型假设给出以下若干符号的定义与说明。
 \begin{tabular}{ccc}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule\end{tabular}
-\section{问题一的模型建立与求解}
+\section{模型的建立与求解}
+\textbf{数据预处理：}检查缺失与异常并构造变量。
+\subsection{问题一的模型建立与求解}
+先总览目标、主模型、输入输出、求解与验证路线。
+\subsubsection{模型的建立}定义变量、目标和约束。
+\subsubsection{模型的求解}记录参数与停止条件。
+\subsubsection{模型的计算结果}核心结果为 12.3 单位。
+\subsubsection{问题一结果验证与解释}完成误差检验并说明边界。
 人工智能工具使用说明见文献\cite{ai-tool}。模型依据中文研究\cite{model-zh}
 与 English study\cite{model-en}，参数与停止条件均已记录。
+\section{模型的评价}
+\subsection{模型的优点}与正文证据对应。
+\subsection{模型的缺点}说明原因和影响。
+\subsection{模型的推广}说明需要替换的数据与约束。
 \clearpage
 \bibliography{references}
 \appendix
