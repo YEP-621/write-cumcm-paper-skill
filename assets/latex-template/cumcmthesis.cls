@@ -171,6 +171,29 @@
 \newcolumntype{R}{>{\raggedleft\arraybackslash}X}
 \newcommand{\CumcmFigureWidth}{0.82\textwidth}
 \newcommand{\CumcmWideFigureWidth}{0.92\textwidth}
+\newcommand{\CumcmTableWidth}{0.92\textwidth}
+
+% Every formula contributes to its chapter's appearance counter. Ordinary
+% formulae show chapter-appearance tags; formulae cited later use the normal
+% global equation counter and therefore do not show a second tag.
+\newcounter{cumcmformula}[section]
+\renewcommand{\thecumcmformula}{\thesection-\arabic{cumcmformula}}
+\newcommand{\CumcmInlineFormula}[1]{%
+  \refstepcounter{cumcmformula}%
+  \(#1\)\nobreak\textup{（\thecumcmformula）}%
+}
+\newenvironment{CumcmDisplayFormula}{%
+  \refstepcounter{cumcmformula}%
+  \begin{equation*}\tag{\thecumcmformula}%
+}{%
+  \end{equation*}%
+}
+\newenvironment{CumcmReferencedEquation}{%
+  \refstepcounter{cumcmformula}%
+  \begin{equation}%
+}{%
+  \end{equation}%
+}
 
 \renewcommand{\refname}{参考文献}
 \renewcommand{\bibsection}{\section*{\cumcmhei\zihao{4}\bfseries\refname}}
