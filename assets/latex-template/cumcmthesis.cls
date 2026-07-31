@@ -173,26 +173,23 @@
 \newcommand{\CumcmWideFigureWidth}{0.92\textwidth}
 \newcommand{\CumcmTableWidth}{0.92\textwidth}
 
-% Every formula contributes to its chapter's appearance counter. Ordinary
-% formulae show chapter-appearance tags; formulae cited later use the normal
-% global equation counter and therefore do not show a second tag.
+% Only formulae explicitly cited later receive chapter-local numbers.
+% The two legacy ordinary-formula helpers remain as unnumbered wrappers.
 \newcounter{cumcmformula}[section]
 \renewcommand{\thecumcmformula}{\thesection-\arabic{cumcmformula}}
 \newcommand{\CumcmInlineFormula}[1]{%
-  \refstepcounter{cumcmformula}%
-  \(#1\)\nobreak\textup{（\thecumcmformula）}%
+  \(#1\)%
 }
 \newenvironment{CumcmDisplayFormula}{%
-  \refstepcounter{cumcmformula}%
-  \begin{equation*}\tag{\thecumcmformula}%
+  \begin{equation*}%
 }{%
   \end{equation*}%
 }
 \newenvironment{CumcmReferencedEquation}{%
   \refstepcounter{cumcmformula}%
-  \begin{equation}%
+  \begin{equation*}\tag{\thecumcmformula}%
 }{%
-  \end{equation}%
+  \end{equation*}%
 }
 
 \renewcommand{\refname}{参考文献}

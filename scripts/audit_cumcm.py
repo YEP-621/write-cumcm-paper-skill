@@ -952,45 +952,43 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
             )
         )
 
-    naked_display = re.search(
-        r"\\begin\{(?:equation|align|gather|multline|split)\*?\}|\\\[",
+    auto_numbered_display = re.search(
+        r"\\begin\{(?:equation|align|gather|multline)\}",
         text,
     )
-    if naked_display:
+    if auto_numbered_display:
         issues.append(
             Issue(
                 "硬错误",
-                "公式未使用规定编号环境",
-                naked_display.group(0),
-                "普通行间公式使用 CumcmDisplayFormula；后文引用的核心公式使用 CumcmReferencedEquation。",
+                "未被允许的自动编号公式环境",
+                auto_numbered_display.group(0),
+                "无后文引用时改用 \\[...\\]、equation* 或 align*；有后文明确引用时改用 CumcmReferencedEquation。",
             )
         )
 
-    inline_formula_pattern = re.compile(
-        r"(?:\\\((.*?)\\\)|(?<!\\)\$(?!\$)(.*?)(?<!\\)\$)", re.S
+    without_referenced_formulae = re.sub(
+        r"\\begin\{CumcmReferencedEquation\}.*?\\end\{CumcmReferencedEquation\}",
+        "",
+        text,
+        flags=re.S,
     )
-    formula_operator = re.compile(
-        r"(?:=|<|>|\\(?:le|ge|neq|approx|sim|sum|prod|int|frac|sqrt|argmax|argmin|max|min)\b|(?<!-)\+(?!\+)|(?<!-)\-(?!-)|/|\\times\b|\\cdot\b)"
-    )
-    for match in inline_formula_pattern.finditer(text):
-        body = match.group(1) or match.group(2) or ""
-        if formula_operator.search(body):
-            issues.append(
-                Issue(
-                    "硬错误",
-                    "行内公式未使用章内编号命令",
-                    body[:120],
-                    "改用 \\CumcmInlineFormula{...}；单个变量或符号的普通出现无需单独编号。",
-                )
+    manual_tag = re.search(r"\\tag\*?\{", without_referenced_formulae)
+    if manual_tag:
+        issues.append(
+            Issue(
+                "硬错误",
+                "未被引用的公式使用了手工编号",
+                manual_tag.group(0),
+                "删除手工 \\tag；只有 CumcmReferencedEquation 内、且后文明确引用的公式允许编号。",
             )
-            break
+        )
 
     for match in re.finditer(r"\\begin\{CumcmReferencedEquation\}(.*?)\\end\{CumcmReferencedEquation\}", text, re.S):
         label = re.search(r"\\label\{([^{}]+)\}", match.group(1))
         referenced_later = bool(
             label
             and re.search(
-                rf"\\(?:eqref|ref)\{{{re.escape(label.group(1))}\}}",
+                rf"\\eqref\{{{re.escape(label.group(1))}\}}",
                 text[match.end():],
             )
         )
@@ -998,9 +996,9 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
             issues.append(
                 Issue(
                     "硬错误",
-                    "核心公式没有后文交叉引用",
+                    "带编号公式没有后文明确引用",
                     label.group(1) if label else "缺少 \\label",
-                    "仅把后文会用到的公式放入 CumcmReferencedEquation，并设置 \\label 后在后文用 \\eqref 引用。",
+                    "仅把后文会明确引用的公式放入 CumcmReferencedEquation，并设置 \\label 后在后文用 \\eqref 引用；其余公式不编号。",
                 )
             )
 
@@ -1307,7 +1305,7 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
         if not formula_symbols:
             continue
         following = text[end : end + 600]
-        following = re.split(r"\\(?:section|subsection|subsubsection|begin\{(?:equation|align|gather|multline))", following, maxsplit=1)[0]
+        following = re.split(r"\\(?:section|subsection|subsubsection|begin\{(?:CumcmDisplayFormula|CumcmReferencedEquation|equation|align|gather|multline))", following, maxsplit=1)[0]
         local_symbols: set[str] = set()
         if "其中" in following:
             for pair in re.findall(r"\$(.+?)\$|\\\((.+?)\\\)", following, re.S):

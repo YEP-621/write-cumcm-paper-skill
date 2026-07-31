@@ -385,29 +385,32 @@ class AuditTests(unittest.TestCase):
             main = Path(temp) / "document.tex"
             invalid = [source(main, r"""
 \begin{cumcmabstract}{回归模型；稳健性检验；结果分析；误差评估；适用边界}摘要\end{cumcmabstract}
-行内关系为 \(y=ax+b\)。\begin{equation}y=ax+b\end{equation}
+普通行内公式为 \(y=ax+b\)。\begin{equation}y=ax+b\end{equation}
+\begin{CumcmReferencedEquation}y=2x\label{eq:unused}\end{CumcmReferencedEquation}
+\[z=x+1\tag{3-9}\]
 """)]
             issues: list[audit.Issue] = []
             audit.check_quality(invalid, issues)
             titles = {item.title for item in issues}
-            self.assertIn("行内公式未使用章内编号命令", titles)
-            self.assertIn("公式未使用规定编号环境", titles)
+            self.assertNotIn("行内公式未使用章内编号命令", titles)
+            self.assertIn("未被允许的自动编号公式环境", titles)
+            self.assertIn("带编号公式没有后文明确引用", titles)
+            self.assertIn("未被引用的公式使用了手工编号", titles)
 
             valid = [source(main, r"""
 \begin{cumcmabstract}{回归模型；稳健性检验；结果分析；误差评估；适用边界}摘要\end{cumcmabstract}
 \section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ $y$ & 结果 & -- \\ \bottomrule
 \section{模型建立}
-\CumcmInlineFormula{y=x+1}
+普通行内公式为 \(y=x+1\)。
 \begin{CumcmReferencedEquation}y=2x\label{eq:core}\end{CumcmReferencedEquation}
-由式\eqref{eq:core}继续计算。
-\begin{CumcmDisplayFormula}y=3x\end{CumcmDisplayFormula}
+由公式\eqref{eq:core}继续计算。
+\[y=3x\]
 """)]
             issues = []
             audit.check_quality(valid, issues)
             titles = {item.title for item in issues}
-            self.assertNotIn("行内公式未使用章内编号命令", titles)
-            self.assertNotIn("公式未使用规定编号环境", titles)
-            self.assertNotIn("核心公式没有后文交叉引用", titles)
+            self.assertNotIn("未被允许的自动编号公式环境", titles)
+            self.assertNotIn("带编号公式没有后文明确引用", titles)
 
     def test_table_symbol_row_and_needspace_rules_are_enforced(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -433,7 +436,7 @@ class AuditTests(unittest.TestCase):
 \section{模型假设}假设只改变一条约束。
 \section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
 \section{模型建立}
-\begin{CumcmDisplayFormula}x=y+z\end{CumcmDisplayFormula}
+\[x=y+z\]
 其中，\(y\) 为观测量，\(z\) 为修正量。
 """)]
             issues: list[audit.Issue] = []
@@ -448,7 +451,7 @@ class AuditTests(unittest.TestCase):
 \section{问题分析}任务输出、附件数据、模型求解与验证。
 \section{模型假设}假设只改变一条约束。
 \section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
-\section{模型建立}\begin{CumcmDisplayFormula}x=y+z\end{CumcmDisplayFormula}
+\section{模型建立}\[x=y+z\]
 """)]
             issues: list[audit.Issue] = []
             audit.check_quality(sources, issues)
