@@ -885,6 +885,7 @@ def symbol_table_tokens(text: str) -> set[str]:
 
 def displayed_formulae(text: str):
     patterns = (
+        r"\\begin\{(?:CumcmDisplayFormula|CumcmReferencedEquation)\}(.*?)\\end\{(?:CumcmDisplayFormula|CumcmReferencedEquation)\}",
         r"\\begin\{(?:equation|align|gather|multline|split)\*?\}(.*?)\\end\{(?:equation|align|gather|multline|split)\*?\}",
         r"\\\[(.*?)\\\]",
     )
@@ -905,17 +906,137 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
     abstract_match = re.search(r"\\begin\{cumcmabstract\}\{([^{}]*)\}", text)
     if abstract_match:
         keywords = [item.strip() for item in abstract_match.group(1).split("；")]
-        if len(keywords) != 5 or any(not item for item in keywords) or ";" in abstract_match.group(1):
+        if (
+            len(keywords) != 5
+            or any(not item for item in keywords)
+            or ";" in abstract_match.group(1)
+            or any(not re.search(r"[\u4e00-\u9fff]", item) for item in keywords)
+        ):
             issues.append(
                 Issue(
                     "硬错误",
                     "摘要关键词格式不符合五项中文分号规范",
                     abstract_match.group(1),
-                    "改为：关键词：关键词 1；关键词 2；关键词 3；关键词 4；关键词 5。",
+                    "改为五个含中文的关键词并用中文分号分隔，例如：预测模型；稳健性检验；结果分析；误差评估；适用边界。",
                 )
             )
     else:
         issues.append(Issue("硬错误", "缺少标准摘要环境", "未找到 cumcmabstract", "使用模板摘要环境并填写五个关键词。"))
+    abstract_body_match = re.search(
+        r"\\begin\{cumcmabstract\}\{[^{}]*\}(.*?)\\end\{cumcmabstract\}", text, re.S
+    )
+    if abstract_body_match and re.search(
+        r"\\textbf\{\s*针对问题[一二三四五六七八九十\d]+[^{}]*\}",
+        abstract_body_match.group(1),
+    ):
+        issues.append(
+            Issue(
+                "硬错误",
+                "摘要结构提示被错误加粗",
+                "检测到加粗的‘针对问题一/二……’结构提示",
+                "取消结构提示的粗体，只选择性加粗重要方法、核心指标或关键数值。",
+            )
+        )
+
+    acronym_match = re.search(
+        r"[\u4e00-\u9fff]{2,}[（(]\s*(?:[A-Z][A-Za-z0-9+\-]{1,20}|[A-Za-z]+(?:\s+[A-Za-z]+)+)\s*[）)]",
+        text,
+    )
+    if acronym_match:
+        issues.append(
+            Issue(
+                "硬错误",
+                "中文学术术语后附有英文解释或缩写",
+                acronym_match.group(0),
+                "删除括号内英文解释或缩写，只保留中文学术术语；无通行中文名的英文专名可独立出现。",
+            )
+        )
+
+    auto_numbered_display = re.search(
+        r"\\begin\{(?:equation|align|gather|multline)\}",
+        text,
+    )
+    if auto_numbered_display:
+        issues.append(
+            Issue(
+                "硬错误",
+                "未被允许的自动编号公式环境",
+                auto_numbered_display.group(0),
+                "无后文引用时改用 \\[...\\]、equation* 或 align*；有后文明确引用时改用 CumcmReferencedEquation。",
+            )
+        )
+
+    without_referenced_formulae = re.sub(
+        r"\\begin\{CumcmReferencedEquation\}.*?\\end\{CumcmReferencedEquation\}",
+        "",
+        text,
+        flags=re.S,
+    )
+    manual_tag = re.search(r"\\tag\*?\{", without_referenced_formulae)
+    if manual_tag:
+        issues.append(
+            Issue(
+                "硬错误",
+                "未被引用的公式使用了手工编号",
+                manual_tag.group(0),
+                "删除手工 \\tag；只有 CumcmReferencedEquation 内、且后文明确引用的公式允许编号。",
+            )
+        )
+
+    for match in re.finditer(r"\\begin\{CumcmReferencedEquation\}(.*?)\\end\{CumcmReferencedEquation\}", text, re.S):
+        label = re.search(r"\\label\{([^{}]+)\}", match.group(1))
+        referenced_later = bool(
+            label
+            and re.search(
+                rf"\\eqref\{{{re.escape(label.group(1))}\}}",
+                text[match.end():],
+            )
+        )
+        if not label or not referenced_later:
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "带编号公式没有后文明确引用",
+                    label.group(1) if label else "缺少 \\label",
+                    "仅把后文会明确引用的公式放入 CumcmReferencedEquation，并设置 \\label 后在后文用 \\eqref 引用；其余公式不编号。",
+                )
+            )
+
+    for match in re.finditer(r"\\Needspace\{([0-9.]+)\\textheight\}", text):
+        try:
+            fraction = float(match.group(1))
+        except ValueError:
+            continue
+        if fraction > 0.25:
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "标题前预留空间超过四分之一页",
+                    match.group(0),
+                    "将 Needspace 调整到不超过 0.25\\textheight，并通过浮动位置、表格断行或标题前空间解决分页。",
+                )
+            )
+
+    for match in re.finditer(r"\\begin\{tabularx\}\{([^{}]+)\}", text):
+        width = re.sub(r"\s+", "", match.group(1))
+        if width not in {r"\CumcmTableWidth", r"0.92\textwidth", r".92\textwidth"}:
+            issues.append(
+                Issue(
+                    "硬错误",
+                    "正文表格宽度不是 0.92 倍版心",
+                    width,
+                    "统一改用 \\begin{tabularx}{\\CumcmTableWidth}{...}，简单表格也不得缩窄。",
+                )
+            )
+    if re.search(r"\\begin\{(?:tabular|longtable)\}", text):
+        issues.append(
+            Issue(
+                "硬错误",
+                "正文表格使用了不可控的自然宽度",
+                "检测到 tabular 或 longtable",
+                "优先改为宽度 \\CumcmTableWidth 的 tabularx；长表需显式保证约 0.92\\textwidth 并人工复核。",
+            )
+        )
 
     expected_sections = [
         "问题描述",
@@ -1154,13 +1275,37 @@ def check_quality(sources: list[SourceFile], issues: list[Issue]) -> None:
                 )
             )
 
+    if symbols:
+        combined_row_allowed = re.search(r"页面空间(?:确实)?(?:不足|限制)", symbols) is not None
+        for row in re.split(r"\\\\", symbols):
+            if "&" not in row:
+                continue
+            first_cell = row.split("&", 1)[0]
+            math_cells = [
+                first or second
+                for first, second in re.findall(r"\$(.+?)\$|\\\((.+?)\\\)", first_cell, re.S)
+            ]
+            multiple_symbols = len(math_cells) > 1 or any(
+                len(math_symbol_tokens(cell)) > 1 or re.search(r"[,，、;；]", cell)
+                for cell in math_cells
+            )
+            if multiple_symbols and not combined_row_allowed:
+                issues.append(
+                    Issue(
+                        "硬错误",
+                        "符号说明表一行包含多个符号",
+                        first_cell.strip()[:120],
+                        "原则上一行只写一个符号；仅在页面空间确实不足时合并关系紧密的符号，并在表下注明原因。",
+                    )
+                )
+                break
     global_symbols = symbol_table_tokens(text)
     for start, end, formula in displayed_formulae(text):
         formula_symbols = math_symbol_tokens(formula)
         if not formula_symbols:
             continue
         following = text[end : end + 600]
-        following = re.split(r"\\(?:section|subsection|subsubsection|begin\{(?:equation|align|gather|multline))", following, maxsplit=1)[0]
+        following = re.split(r"\\(?:section|subsection|subsubsection|begin\{(?:CumcmDisplayFormula|CumcmReferencedEquation|equation|align|gather|multline))", following, maxsplit=1)[0]
         local_symbols: set[str] = set()
         if "其中" in following:
             for pair in re.findall(r"\$(.+?)\$|\\\((.+?)\\\)", following, re.S):

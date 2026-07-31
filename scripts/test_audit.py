@@ -356,6 +356,77 @@ class AuditTests(unittest.TestCase):
             audit.check_quality(sources, issues)
             self.assertIn("摘要关键词格式不符合五项中文分号规范", {item.title for item in issues})
 
+    def test_pure_english_keyword_is_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{XGBoost；稳健性检验；结果分析；误差评估；适用边界}摘要\end{cumcmabstract}
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            self.assertIn("摘要关键词格式不符合五项中文分号规范", {item.title for item in issues})
+
+    def test_abstract_bold_and_parenthetical_english_are_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{回归模型；稳健性检验；结果分析；误差评估；适用边界}
+\textbf{针对问题一，}采用主成分分析（PCA）。
+\end{cumcmabstract}
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            titles = {item.title for item in issues}
+            self.assertIn("摘要结构提示被错误加粗", titles)
+            self.assertIn("中文学术术语后附有英文解释或缩写", titles)
+
+    def test_formula_numbering_environments_are_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            invalid = [source(main, r"""
+\begin{cumcmabstract}{回归模型；稳健性检验；结果分析；误差评估；适用边界}摘要\end{cumcmabstract}
+普通行内公式为 \(y=ax+b\)。\begin{equation}y=ax+b\end{equation}
+\begin{CumcmReferencedEquation}y=2x\label{eq:unused}\end{CumcmReferencedEquation}
+\[z=x+1\tag{3-9}\]
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(invalid, issues)
+            titles = {item.title for item in issues}
+            self.assertNotIn("行内公式未使用章内编号命令", titles)
+            self.assertIn("未被允许的自动编号公式环境", titles)
+            self.assertIn("带编号公式没有后文明确引用", titles)
+            self.assertIn("未被引用的公式使用了手工编号", titles)
+
+            valid = [source(main, r"""
+\begin{cumcmabstract}{回归模型；稳健性检验；结果分析；误差评估；适用边界}摘要\end{cumcmabstract}
+\section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ $y$ & 结果 & -- \\ \bottomrule
+\section{模型建立}
+普通行内公式为 \(y=x+1\)。
+\begin{CumcmReferencedEquation}y=2x\label{eq:core}\end{CumcmReferencedEquation}
+由公式\eqref{eq:core}继续计算。
+\[y=3x\]
+""")]
+            issues = []
+            audit.check_quality(valid, issues)
+            titles = {item.title for item in issues}
+            self.assertNotIn("未被允许的自动编号公式环境", titles)
+            self.assertNotIn("带编号公式没有后文明确引用", titles)
+
+    def test_table_symbol_row_and_needspace_rules_are_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            main = Path(temp) / "document.tex"
+            sources = [source(main, r"""
+\begin{cumcmabstract}{回归模型；稳健性检验；结果分析；误差评估；适用边界}摘要\end{cumcmabstract}
+\Needspace{0.30\textheight}
+\section{定义与符号说明}
+\begin{tabularx}{0.70\textwidth}{CCC}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x,y$ & 两个变量 & -- \\ \bottomrule\end{tabularx}
+""")]
+            issues: list[audit.Issue] = []
+            audit.check_quality(sources, issues)
+            titles = {item.title for item in issues}
+            self.assertIn("正文表格宽度不是 0.92 倍版心", titles)
+            self.assertIn("符号说明表一行包含多个符号", titles)
+            self.assertIn("标题前预留空间超过四分之一页", titles)
     def test_formula_symbols_may_be_global_or_locally_explained(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             main = Path(temp) / "document.tex"
@@ -365,7 +436,7 @@ class AuditTests(unittest.TestCase):
 \section{模型假设}假设只改变一条约束。
 \section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
 \section{模型建立}
-\begin{equation}x=y+z\end{equation}
+\[x=y+z\]
 其中，\(y\) 为观测量，\(z\) 为修正量。
 """)]
             issues: list[audit.Issue] = []
@@ -380,7 +451,7 @@ class AuditTests(unittest.TestCase):
 \section{问题分析}任务输出、附件数据、模型求解与验证。
 \section{模型假设}假设只改变一条约束。
 \section{定义与符号说明}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 结果 & -- \\ \bottomrule
-\section{模型建立}\begin{equation}x=y+z\end{equation}
+\section{模型建立}\[x=y+z\]
 """)]
             issues: list[audit.Issue] = []
             audit.check_quality(sources, issues)
@@ -466,7 +537,7 @@ class AuditTests(unittest.TestCase):
 仅保留会改变约束的一条必要假设。
 \section{定义与符号说明}
 便于后续模型建立与求解，本文基于上述问题分析与模型假设给出以下若干符号的定义与说明。
-\begin{tabular}{ccc}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule\end{tabular}
+\begin{tabularx}{\CumcmTableWidth}{CCC}\toprule 符号定义 & 符号说明 & 单位 \\ \midrule $x$ & 变量 & -- \\ \bottomrule\end{tabularx}
 \section{模型的建立与求解}
 \textbf{数据预处理：}检查缺失与异常并构造变量。
 \subsection{问题一的模型建立与求解}

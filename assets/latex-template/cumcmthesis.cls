@@ -171,6 +171,26 @@
 \newcolumntype{R}{>{\raggedleft\arraybackslash}X}
 \newcommand{\CumcmFigureWidth}{0.82\textwidth}
 \newcommand{\CumcmWideFigureWidth}{0.92\textwidth}
+\newcommand{\CumcmTableWidth}{0.92\textwidth}
+
+% Only formulae explicitly cited later receive chapter-local numbers.
+% The two legacy ordinary-formula helpers remain as unnumbered wrappers.
+\newcounter{cumcmformula}[section]
+\renewcommand{\thecumcmformula}{\thesection-\arabic{cumcmformula}}
+\newcommand{\CumcmInlineFormula}[1]{%
+  \(#1\)%
+}
+\newenvironment{CumcmDisplayFormula}{%
+  \begin{equation*}%
+}{%
+  \end{equation*}%
+}
+\newenvironment{CumcmReferencedEquation}{%
+  \refstepcounter{cumcmformula}%
+  \begin{equation*}\tag{\thecumcmformula}%
+}{%
+  \end{equation*}%
+}
 
 \renewcommand{\refname}{参考文献}
 \renewcommand{\bibsection}{\section*{\cumcmhei\zihao{4}\bfseries\refname}}
